@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot name="omni_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find omni_description)/urdf/4wheel/base_link.urdf.xacro"/>
+  <xacro:include filename="$(find omni_description)/urdf/common/gazebo_plugins.urdf.xacro"/>
+  <xacro:include filename="$(find omni_description)/urdf/4wheel/ros2_control.urdf.xacro"/>
+
+  <xacro:property name="mesh_prefix" value="4wheel"/>
+
+  <link name="base_footprint"/>
+
+  <xacro:base_link parent="base_footprint" xyz="0 0 0" rpy="0 0 0"/>
+
+  <xacro:gazebo_plugins controller_config="$(find omni_controller)/config/4wheel.yaml"/>
+</robot>
