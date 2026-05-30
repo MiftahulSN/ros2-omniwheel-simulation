@@ -85,7 +85,7 @@ source install/setup.bash
 ros2 launch omni_description description.launch.py wheel_config:=3wheel
 
 # Launch Gazebo simulation
-ros2 launch omni_bringup simulation.launch.py wheel_config:=3wheel
+ros2 launch omni_bringup sim.launch.py wheel_config:=3wheel
 
 # SLAM mapping
 ros2 launch omni_bringup slam.launch.py wheel_config:=3wheel
