@@ -11,6 +11,7 @@
 
   <depend>omni_gazebo</depend>
   <depend>omni_navigation</depend>
+  <!-- <depend>omni_controller</depend> -->
 
   <export>
     <build_type>ament_cmake</build_type>

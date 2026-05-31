@@ -4,6 +4,7 @@
   <xacro:include filename="$(find omni_description)/urdf/common/sensors/camera.urdf.xacro"/>
   <xacro:include filename="$(find omni_description)/urdf/common/sensors/lidar.urdf.xacro"/>
   <xacro:include filename="$(find omni_description)/urdf/common/sensors/imu.urdf.xacro"/>
+  <xacro:include filename="$(find omni_description)/urdf/common/heading.urdf.xacro"/>
 
   <xacro:macro name="base_link" params="parent xyz rpy">
     <link name="base_link">
@@ -36,5 +37,6 @@
     <xacro:camera parent="base_link" suffix="1" xyz="0.1035 -0.0000 0.0630" rpy="0 0 0"/>
     <xacro:lidar parent="base_link" suffix="1" xyz="0.0000 0.0000 0.1010" rpy="0 0 0"/>
     <xacro:imu parent="base_link" suffix="1" xyz="0 0 0" rpy="0 0 0"/>
+    <xacro:heading_indicator parent="base_link"/>
   </xacro:macro>
 </robot>

@@ -96,6 +96,21 @@ ros2 launch omni_bringup navigation.launch.py wheel_config:=3wheel
 
 Replace `3wheel` with `4wheel` for the 4-wheel variant.
 
+### Teleop (run in a separate terminal)
+
+```bash
+ros2 run omni_controller omni_teleop.py
+
+# Or via launch
+ros2 launch omni_bringup teleop.launch.py
+```
+
+| Key | Action | | Key | Action |
+|---|---|---|---|---|
+| `W` / `S` | Forward / Backward | | `Q` / `E` | Rotate left / right |
+| `A` / `D` | Strafe left / right | | `Space` | Stop all |
+| `C` / `Z` | Linear speed +/- | | `V` / `X` | Angular speed +/- |
+
 ---
 
 ## Pipeline
