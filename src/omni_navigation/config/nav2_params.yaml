@@ -125,7 +125,7 @@ controller_server:
     use_sim_time: True
     controller_frequency: 10.0
     min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
+    min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
@@ -150,21 +150,20 @@ controller_server:
       debug_trajectory_details: True
       publish_trajectories: True
       min_vel_x: 0.0
-      min_vel_y: 0.0
+      min_vel_y: -1.5
       max_vel_x: 1.5
-      max_vel_y: 0.0
+      max_vel_y: 1.5
       max_vel_theta: 2.0
       min_speed_xy: 0.0
       max_speed_xy: 1.5
-      min_speed_theta: 0.0
       acc_lim_x: 1.5
-      acc_lim_y: 0.0
+      acc_lim_y: 1.5
       acc_lim_theta: 2.0
       decel_lim_x: -1.5
-      decel_lim_y: 0.0
+      decel_lim_y: -1.5
       decel_lim_theta: -3.2
       vx_samples: 10
-      vy_samples: 0
+      vy_samples: 10
       vtheta_samples: 20
       sim_time: 1.0
       linear_granularity: 0.05

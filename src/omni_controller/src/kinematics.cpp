@@ -74,15 +74,6 @@ public:
     tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
     last_time = this->get_clock()->now();
-
-    double C = 2 * r / sqrt(3);
-    double h = 0 * M_PI / 180;
-    mOd[0][0] = C * (cos(2 * M_PI / 3 + h) - (cos(2 * M_PI / 3 + h) - cos(h)) / 3);
-    mOd[0][1] = C * (-cos(h) - (cos(2 * M_PI / 3 + h) - cos(h)) / 3);
-    mOd[0][2] = C * (-(cos(2 * M_PI / 3 + h) - cos(h)) / 3);
-    mOd[1][0] = C * (sin(2 * M_PI / 3 + h) - (sin(2 * M_PI / 3 + h) - sin(h)) / 3);
-    mOd[1][1] = C * (-sin(h) - (sin(2 * M_PI / 3 + h) - sin(h)) / 3);
-    mOd[1][2] = C * (-(sin(2 * M_PI / 3 + h) - sin(h)) / 3);
   }
 
   ~OmniKinematics() {
@@ -108,7 +99,6 @@ private:
   double r; // wheel radius
   double R; // Robot Radius
   double heading_offset;
-  double mOd[2][3] = {{0, 0, 0}, {0, 0, 0}};
   double pos_x = 0;
   double pos_y = 0;
   double vx = 0;
@@ -157,6 +147,11 @@ private:
         
         pos_x += dp(0);
         pos_y += dp(1);
+
+        if (dt > 0) {
+          vx = dp(0) / dt;
+          vy = dp(1) / dt;
+        }
         // RCLCPP_INFO(this->get_logger(), "%f %f %f %f %f", w1, w2, w3, vx, vy);
         publish_odom(current_time);
   }
