@@ -4,6 +4,8 @@ A ROS2 Humble simulation of an omnidirectional mobile robot.
 
 Supports **3-wheel** (120-degree) and **4-wheel** (X-configuration) omni-wheel variants.
 
+> **Note**: This project is a personal learning and educational exercise. It was built from scratch to understand the full ROS2 simulation stack (URDF, Gazebo, ros2_control, SLAM, Nav2) by studying and re-implementing concepts from the reference listed below. It is not intended for production use.
+
 ---
 
 ## Prerequisites
@@ -143,6 +145,25 @@ A fully functional ROS2 simulation stack where an omnidirectional robot can:
 
 ---
 
+## Acknowledgements
+
+This project would not have been possible without the following reference:
+
+### [YePeOn7/ros2_omni_robot_sim](https://github.com/YePeOn7/ros2_omni_robot_sim)
+
+A huge thank you to **[YePeOn7](https://github.com/YePeOn7)** for creating an excellent omnidirectional robot Gazebo simulation with ROS2. Their project was the primary reference and inspiration for this entire learning exercise. Specifically, the following concepts and techniques were learned and adapted from their work:
+
+- Omnidirectional kinematics (forward/inverse via matrix transform + SVD pseudo-inverse)
+- URDF/Xacro robot modeling with shared sensor macros
+- Gazebo Ignition simulation integration (`gz_ros2_control`, sensor bridges)
+- ros2_control hardware interface setup (velocity controllers)
+- SLAM Toolbox mapping pipeline
+- Nav2 autonomous navigation configuration
+
+Their original repo supports 3 to 6 wheel variants on **ROS2 Jazzy + Gazebo Harmonic**, while this project was rewritten from the ground up for **ROS2 Humble + Gazebo Fortress** with a different multi-package architecture and some modifications along the way.
+
+---
+
 ## License
 
-TODO
+MIT
