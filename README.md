@@ -163,7 +163,3 @@ A huge thank you to **[YePeOn7](https://github.com/YePeOn7)** for creating an ex
 Their original repo supports 3 to 6 wheel variants on **ROS2 Jazzy + Gazebo Harmonic**, while this project was rewritten from the ground up for **ROS2 Humble + Gazebo Fortress** with a different multi-package architecture and some modifications along the way.
 
 ---
-
-## License
-
-MIT
