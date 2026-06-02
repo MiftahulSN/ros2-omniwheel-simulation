@@ -3,7 +3,7 @@
 <package format="3">
   <name>omni_bringup</name>
   <version>0.0.0</version>
-  <description>Omni-wheel robot top-level bringup launch files</description>
+  <description>Omni-wheel robot top-level launch files</description>
   <maintainer email="mift@todo.todo">mift</maintainer>
   <license>MIT</license>
 
@@ -11,7 +11,9 @@
 
   <depend>omni_gazebo</depend>
   <depend>omni_navigation</depend>
-  <!-- <depend>omni_controller</depend> -->
+  <depend>nav2_bringup</depend>
+  <depend>slam_toolbox</depend>
+  <depend>rviz2</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

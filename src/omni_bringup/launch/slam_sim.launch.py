@@ -1,9 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    TimerAction,
-)
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -20,12 +16,14 @@ ARGUMENTS = [
     DeclareLaunchArgument(
         'world',
         default_value='maze2',
-        description='Gazebo World',
+        description='Gazebo world name',
     ),
 ]
 
 
 def generate_launch_description():
+    pkg_nav = get_package_share_directory('omni_navigation')
+
     gazebo_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
@@ -39,21 +37,19 @@ def generate_launch_description():
         }.items(),
     )
 
-    nav2_launch = IncludeLaunchDescription(
+    slam_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
-                get_package_share_directory('omni_navigation'),
-                'launch', 'nav2.launch.py',
+                get_package_share_directory('slam_toolbox'),
+                'launch', 'online_async_launch.py',
             ])
         ),
         launch_arguments={
-            'world': LaunchConfiguration('world'),
+            'use_sim_time': 'true',
+            'slam_params_file': PathJoinSubstitution([
+                pkg_nav, 'config', 'slam_params.yaml',
+            ]),
         }.items(),
-    )
-
-    delayed_nav2 = TimerAction(
-        period=5.0,
-        actions=[nav2_launch],
     )
 
     rviz2 = Node(
@@ -63,16 +59,13 @@ def generate_launch_description():
         output='screen',
         arguments=[
             '-d',
-            PathJoinSubstitution([
-                get_package_share_directory('omni_navigation'),
-                'rviz', 'navigation.rviz',
-            ]),
+            PathJoinSubstitution([pkg_nav, 'rviz', 'slam.rviz']),
         ],
         parameters=[{'use_sim_time': True}],
     )
 
     ld = LaunchDescription(ARGUMENTS)
     ld.add_action(gazebo_sim)
-    ld.add_action(delayed_nav2)
+    ld.add_action(slam_launch)
     ld.add_action(rviz2)
     return ld

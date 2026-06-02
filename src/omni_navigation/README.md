@@ -1,92 +1,31 @@
 # omni_navigation
 
-SLAM and Nav2 autonomous navigation configs for the omni-wheel robot.
+Nav2 and SLAM configuration files for the omni-wheel robot.
+
+This package contains only config, maps, and RViz files. Launch is handled by `omni_bringup`.
 
 ## Directory Structure
 
 ```
 omni_navigation/
 ├── config/
-│   └── nav2_params.yaml         # Nav2 parameter config
-├── launch/
-│   ├── nav2.launch.py           # Nav2 bringup wrapper
-│   ├── slam_gazebo_sim.launch.py
-│   └── navigation_gazebo_sim.launch.py
+│   ├── nav2_params.yaml         # Nav2 parameter config (AMCL + DWB + costmaps)
+│   └── slam_params.yaml         # SLAM Toolbox online async config
 ├── maps/
-│   ├── maze1.yaml + maze1.pgm   # maze1 map
-│   └── maze2.yaml + maze2.pgm   # maze2 map
+│   ├── maze1.yaml + maze1.pgm
+│   └── maze2.yaml + maze2.pgm
 ├── rviz/
-│   ├── slam.rviz
-│   └── navigation.rviz
+│   ├── navigation.rviz
+│   └── slam.rviz
 ├── CMakeLists.txt
 └── package.xml
 ```
 
-## Launch
+## Config Files
 
-### SLAM Mapping
+### `nav2_params.yaml`
 
-Launches Gazebo simulation + SLAM Toolbox + RViz for building maps.
-
-```bash
-ros2 launch omni_navigation slam_gazebo_sim.launch.py
-ros2 launch omni_navigation slam_gazebo_sim.launch.py wheel_config:=4wheel world:=maze1
-```
-
-| Argument | Default | Description |
-|---|---|---|
-| `wheel_config` | `3wheel` | `3wheel` or `4wheel` |
-| `world` | `maze2` | Gazebo world name |
-
-**What it launches:**
-
-| Step | Description |
-|---|---|
-| 1 | Gazebo simulation (`omni_gazebo`) |
-| 2 | SLAM Toolbox (online async) |
-| 3 | RViz2 with `slam.rviz` config |
-
----
-
-### Autonomous Navigation
-
-Launches Gazebo simulation + Nav2 + RViz for autonomous navigation.
-
-```bash
-ros2 launch omni_navigation navigation_gazebo_sim.launch.py
-ros2 launch omni_navigation navigation_gazebo_sim.launch.py world:=maze1
-```
-
-| Argument | Default | Description |
-|---|---|---|
-| `wheel_config` | `3wheel` | `3wheel` or `4wheel` |
-| `world` | `maze2` | Gazebo world name (selects map file) |
-
-**What it launches:**
-
-| Step | Description |
-|---|---|
-| 1 | Gazebo simulation (`omni_gazebo`) |
-| 2 | Nav2 bringup (5s delay for sim init) |
-| 3 | RViz2 with `navigation.rviz` config |
-
----
-
-### Nav2 Standalone
-
-Wraps `nav2_bringup` with the correct map and parameters.
-
-```bash
-ros2 launch omni_navigation nav2.launch.py world:=maze1
-```
-
-| Argument | Default | Description |
-|---|---|---|
-| `world` | `maze2` | Map name (matches `maps/<name>.yaml`) |
-
-## Nav2 Configuration
-
-`config/nav2_params.yaml` key settings:
+Full Nav2 parameter configuration.
 
 | Component | Setting | Value |
 |---|---|---|
@@ -101,6 +40,19 @@ ros2 launch omni_navigation nav2.launch.py world:=maze1
 | BT Navigator | Behavior tree | `navigate_w_replanning_and_recovery.xml` |
 | Recovery | Plugins | spin, backup, wait |
 
+### `slam_params.yaml`
+
+SLAM Toolbox online async configuration.
+
+| Setting | Value |
+|---|---|
+| Solver | Ceres (SPARSE_NORMAL_CHOLESKY) |
+| Resolution | 0.05 m |
+| Max laser range | 20.0 m |
+| Map update interval | 5.0 s |
+| Loop closing | enabled |
+| Base frame | `base_footprint` |
+
 ## Maps
 
 | Map | Resolution | Origin |
@@ -108,11 +60,4 @@ ros2 launch omni_navigation nav2.launch.py world:=maze1
 | `maze1` | 0.05 m/px | (-4.85, -7.64) |
 | `maze2` | 0.05 m/px | (-3.97, -0.84) |
 
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `omni_gazebo` | Simulation launch |
-| `nav2_bringup` | Nav2 navigation stack |
-| `slam_toolbox` | SLAM mapping |
-| `rviz2` | Visualization |
+Maps are selected by the `world` launch argument in `omni_bringup`.

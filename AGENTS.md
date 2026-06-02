@@ -262,12 +262,9 @@ src/omni_gazebo/
 
 ```text
 src/omni_navigation/
-├── launch/
-│   ├── nav2.launch.py                  # Nav2 only (assumes sim running)
-│   ├── navigation_gazebo_sim.launch.py # Gazebo + Nav2
-│   └── slam_gazebo_sim.launch.py       # Gazebo + SLAM Toolbox
 ├── config/
-│   └── nav2_params.yaml                # Nav2 parameters (DWB controller)
+│   ├── nav2_params.yaml                # Nav2 parameters (DWB controller)
+│   └── slam_params.yaml                # SLAM Toolbox online async parameters
 ├── maps/
 │   ├── maze1.pgm + maze1.yaml
 │   └── maze2.pgm + maze2.yaml
@@ -276,6 +273,8 @@ src/omni_navigation/
 │   └── slam.rviz
 └── CMakeLists.txt
 ```
+
+Data-only package (no launch files, no compiled targets). Config and maps are consumed by `omni_bringup`.
 
 ### Nav2 Configuration
 
@@ -290,8 +289,9 @@ src/omni_navigation/
 
 ### SLAM
 
-- Uses SLAM Toolbox online async mode
-- Launch: `slam_gazebo_sim.launch.py` (starts Gazebo + SLAM + RViz)
+- Uses SLAM Toolbox online async mode with `slam_params.yaml`
+- Config: Ceres solver, 0.05m resolution, loop closing enabled
+- Launch: `omni_bringup/slam_sim.launch.py`
 
 ---
 
@@ -302,13 +302,12 @@ src/omni_navigation/
 ```text
 src/omni_bringup/
 ├── launch/
-│   ├── sim.launch.py              # Convenience: gazebo.launch.py wrapper
-│   ├── slam.launch.py             # Convenience: slam_gazebo_sim wrapper
-│   └── navigation.launch.py       # Convenience: navigation_gazebo_sim wrapper
+│   ├── nav_sim.launch.py           # Gazebo + Nav2 bringup (AMCL + planning)
+│   └── slam_sim.launch.py          # Gazebo + SLAM Toolbox
 └── CMakeLists.txt
 ```
 
-All bringup launch files pass through `wheel_config` and `world` arguments.
+Both launch files accept `wheel_config` and `world` arguments.
 
 ---
 
@@ -320,8 +319,8 @@ ros2_ws/
     ├── omni_description/    # URDF/Xacro, meshes, sensors, ros2_control
     ├── omni_controller/     # Kinematics node + velocity controllers + teleop
     ├── omni_gazebo/         # Gazebo worlds, spawn, sensor bridges, controller spawner
-    ├── omni_navigation/     # SLAM + Nav2 (DWB omni controller)
-    └── omni_bringup/        # Convenience launch wrappers
+    ├── omni_navigation/     # Nav2 + SLAM config, maps, RViz
+    └── omni_bringup/        # Top-level launch (nav_sim, slam_sim)
 ```
 
 ### Dependency Graph
@@ -331,8 +330,9 @@ omni_bringup
   ├── omni_gazebo
   │     ├── omni_description (URDF)
   │     └── omni_controller (config + kinematics node)
-  └── omni_navigation
-        └── omni_gazebo (for sim+nav combined launch)
+  ├── omni_navigation (config + maps + rviz)
+  ├── nav2_bringup
+  └── slam_toolbox
 
 omni_controller
   └── omni_description (URDF for ros2_control hardware interface)
@@ -368,7 +368,7 @@ source /opt/ros/humble/setup.bash
 cd /home/mift/Projects/Simulation/Omni-Wheel/ros2_ws
 colcon build
 source install/setup.bash
-ros2 launch omni_bringup sim.launch.py
+ros2 launch omni_gazebo gazebo.launch.py
 
 # Terminal 2: Teleop (wait for simulation to load)
 source /opt/ros/humble/setup.bash
@@ -379,19 +379,19 @@ ros2 run omni_controller omni_teleop.py
 ### With 4-wheel configuration
 
 ```bash
-ros2 launch omni_bringup sim.launch.py wheel_config:=4wheel
+ros2 launch omni_gazebo gazebo.launch.py wheel_config:=4wheel
 ```
 
 ### SLAM mapping
 
 ```bash
-ros2 launch omni_bringup slam.launch.py
+ros2 launch omni_bringup slam_sim.launch.py
 ```
 
 ### Navigation with existing map
 
 ```bash
-ros2 launch omni_bringup navigation.launch.py
+ros2 launch omni_bringup nav_sim.launch.py
 ```
 
 ### Useful debugging commands
