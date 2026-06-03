@@ -1,258 +1,237 @@
 #include <chrono>
-#include <memory>
-#include <iostream>
 #include <cmath>
-#include <vector>
 #include <cstdlib>
+#include <iostream>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include <Eigen/Dense>
 
 #include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/float64_multi_array.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
-#include "sensor_msgs/msg/joint_state.hpp"
 #include "sensor_msgs/msg/imu.hpp"
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2/LinearMath/Quaternion.h>
+#include "sensor_msgs/msg/joint_state.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 #include <tf2/LinearMath/Matrix3x3.h>
-#include <Eigen/Dense>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 using namespace std::chrono_literals;
-using std::placeholders::_1;
-using namespace std;
 
-#define WHEEL_RADIUS        0.03
-#define ROBOT_RADIUS        0.088
-#define DEFAULT_ROBOT_MODEL "3wheel"
-
-std::unordered_map<std::string, int> robot_wheel_count_list = {
-  {"3wheel", 3},
-  {"4wheel", 4},
-};
-
-std::unordered_map<std::string, double> robot_offset_heading_list = {
-  {"3wheel", 0},
-  {"4wheel", -45},
-};
 class OmniKinematics : public rclcpp::Node
 {
+  struct RobotConfig
+  {
+    int wheel_count;
+    double heading_offset;
+  };
+
+  static constexpr double kWheelRadius = 0.03;
+  static constexpr double kRobotRadius = 0.088;
+  static constexpr double kPi = 3.14159265358979323846;
+
+  const std::unordered_map<std::string, RobotConfig> kRobotModels = {
+    {"3wheel", {3, 0.0}},
+    {"4wheel", {4, -45.0}},
+  };
+
 public:
-  OmniKinematics(int num_wheels_, double robot_radius_, double wheel_radius_, double heading_offset_ = 0)
+  explicit OmniKinematics(const std::string & robot_model)
   : Node("omni_kinematics")
   {
-    N = num_wheels_; // num of wheel
-    R = robot_radius_;
-    r = wheel_radius_;
-    heading_offset = heading_offset_;
-
-    tM = init_transform_matrix(N, heading_offset_);
-    // cout << "tM:" << endl;
-    // cout << tM << endl;
-
-    tMI = pseudo_inverse(tM);
-    tMI = Eigen::MatrixXd(tMI.block(0, 0, 2, tMI.cols()));
-    // cout << "tMI:" << endl;
-    // cout << tMI << endl;
-    
-    for(int i = 1; i < N+1; i++) {
-      string joint_name = "omni_wheel_joint_" + to_string(i);
-      wheel_joint_map_index[joint_name] = i - 1;
+    if (kRobotModels.find(robot_model) == kRobotModels.end()) {
+      std::string msg = "Unknown robot model: " + robot_model + "\nValid options are:\n";
+      for (const auto & [name, _] : kRobotModels) {
+        msg += "  - " + name + "\n";
+      }
+      throw std::invalid_argument(msg);
     }
 
-    for(int i = 0; i < N; i++){
-      string topic_name = "wheel" + to_string(i+1) + "_controller/commands";
-      auto pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(topic_name, 10);
-      pub_wheels.push_back(pub);
+    const auto & config = kRobotModels.at(robot_model);
+    num_wheels_ = config.wheel_count;
+    heading_offset_ = config.heading_offset;
+
+    transform_matrix_ = build_transform_matrix(num_wheels_, heading_offset_);
+    auto full_inverse = pseudo_inverse(transform_matrix_);
+    odom_matrix_ = full_inverse.block(0, 0, 2, full_inverse.cols());
+
+    for (int i = 1; i <= num_wheels_; ++i) {
+      std::string joint_name = "omni_wheel_joint_" + std::to_string(i);
+      joint_index_map_[joint_name] = i - 1;
     }
-    pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
 
-    sub_cmd_vel = this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel", 10, std::bind(&OmniKinematics::cmd_vel_callback, this, _1));
-    sub_join_states = this->create_subscription<sensor_msgs::msg::JointState>("joint_states", 10, std::bind(&OmniKinematics::join_states_callback, this, _1));
-    sub_imu = this->create_subscription<sensor_msgs::msg::Imu>("imu", 10, std::bind(&OmniKinematics::imu_callback, this, _1));
+    for (int i = 0; i < num_wheels_; ++i) {
+      std::string topic = "wheel" + std::to_string(i + 1) + "_controller/commands";
+      wheel_pubs_.push_back(
+        this->create_publisher<std_msgs::msg::Float64MultiArray>(topic, 10));
+    }
 
-    tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
+    odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
+    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
-    last_time = this->get_clock()->now();
-  }
+    cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+      "cmd_vel", 10,
+      std::bind(&OmniKinematics::cmd_vel_callback, this, std::placeholders::_1));
 
-  ~OmniKinematics() {
-    cout << "OmniKinematics Destroyed" << endl;
+    joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+      "joint_states", 10,
+      std::bind(&OmniKinematics::joint_state_callback, this, std::placeholders::_1));
+
+    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+      "imu", 10,
+      std::bind(&OmniKinematics::imu_callback, this, std::placeholders::_1));
+
+    last_time_ = this->get_clock()->now();
   }
 
 private:
-  rclcpp::TimerBase::SharedPtr timer_;
-  vector<rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr> pub_wheels;
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odometry;
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_join_states;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
+  int num_wheels_;
+  double heading_offset_;
 
-  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;
+  Eigen::MatrixXd transform_matrix_;
+  Eigen::MatrixXd odom_matrix_;
+  std::unordered_map<std::string, int> joint_index_map_;
 
-  Eigen::MatrixXd tM; //transform matrix from command speed to wheel speed 
-  Eigen::MatrixXd tMI; //Inverse Matrix of tM which is a transform matrix from wheel speed to command speed 
-  unordered_map<string, int> wheel_joint_map_index; // list of wheel joint name with its index
+  std::vector<rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr> wheel_pubs_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-  // size_t count_;
-  int N; // num of wheel
-  double r; // wheel radius
-  double R; // Robot Radius
-  double heading_offset;
-  double pos_x = 0;
-  double pos_y = 0;
-  double vx = 0;
-  double vy = 0;
-  double pitch = 0, roll = 0, yaw = 0;
-  double w = 0;
+  double pos_x_ = 0.0;
+  double pos_y_ = 0.0;
+  double vel_x_ = 0.0;
+  double vel_y_ = 0.0;
+  double yaw_ = 0.0;
+  double angular_vel_z_ = 0.0;
+  rclcpp::Time last_time_;
 
-  rclcpp::Time last_time;
-
-  template <typename T>
-  void print_vector(vector<T>& vec) {
-    std::cout << "[ ";
-    for (const auto& elem : vec) {
-        std::cout << elem << " ";
-    }
-    std::cout << "]" << std::endl;
+  void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg)
+  {
+    Eigen::Vector3d cmd(msg->linear.x, msg->linear.y, msg->angular.z);
+    Eigen::VectorXd wheel_speeds = transform_matrix_ * cmd;
+    publish_wheel_speeds(wheel_speeds);
   }
 
-  void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-    Eigen::VectorXd M = calculate_motor_speed(msg->linear.x, msg->linear.y, msg->angular.z);
-    set_motor_speed(M);
-  }
+  void joint_state_callback(const sensor_msgs::msg::JointState::SharedPtr msg)
+  {
+    Eigen::VectorXd wheel_vel(num_wheels_);
+    wheel_vel.setZero();
 
-  void join_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-        Eigen::VectorXd w(N);
-
-        // Loop through all joint names and extract the velocities for the specified joints
-        for (size_t i = 0; i < msg->name.size(); ++i)
-        {
-          for (const auto& pair : wheel_joint_map_index) {
-            if (msg->name[i] == pair.first){
-                w(pair.second) = msg->velocity[i];
-                break;
-            }
-          }
-        }
-        
-        rclcpp::Time current_time = this->get_clock()->now();
-        double dt = (current_time - last_time).seconds();
-        last_time = current_time;
-        
-        Eigen::Matrix2d rM;
-        rM << cos(yaw), -sin(yaw),
-              sin(yaw), cos(yaw);
-        Eigen::MatrixXd dp = rM * tMI * w * dt;
-        
-        pos_x += dp(0);
-        pos_y += dp(1);
-
-        if (dt > 0) {
-          vx = dp(0) / dt;
-          vy = dp(1) / dt;
-        }
-        // RCLCPP_INFO(this->get_logger(), "%f %f %f %f %f", w1, w2, w3, vx, vy);
-        publish_odom(current_time);
-  }
-
-  void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
-    w = msg->angular_velocity.z;
-    // Convert quaternion to yaw (heading)
-    tf2::Quaternion q(
-        msg->orientation.x,
-        msg->orientation.y,
-        msg->orientation.z,
-        msg->orientation.w
-    );
-
-    tf2::Matrix3x3 m(q);
-    m.getRPY(roll, pitch, yaw); // Extract roll, pitch, and yaw
-
-    // RCLCPP_INFO(this->get_logger(), "Yaw: %f", yaw);
-}
-
-  void publish_odom(rclcpp::Time current_time) {
-    // Create the odometry message
-    nav_msgs::msg::Odometry odom_msg;
-    odom_msg.header.stamp = current_time;
-    odom_msg.header.frame_id = "odom";
-    odom_msg.child_frame_id = "base_footprint";
-
-    // Position
-    odom_msg.pose.pose.position.x = pos_x;
-    odom_msg.pose.pose.position.y = pos_y;
-    odom_msg.pose.pose.position.z = 0.0;
-
-    // Orientation (Quaternion)
-    tf2::Quaternion q;
-    q.setRPY(0, 0, yaw);
-    odom_msg.pose.pose.orientation.x = q.x();
-    odom_msg.pose.pose.orientation.y = q.y();
-    odom_msg.pose.pose.orientation.z = q.z();
-    odom_msg.pose.pose.orientation.w = q.w();
-
-    // Linear velocity
-    odom_msg.twist.twist.linear.x = vx;
-    odom_msg.twist.twist.linear.y = vy;
-    odom_msg.twist.twist.angular.z = w;
-
-    
-    // Publish odometry
-    pub_odometry->publish(odom_msg);
-
-    // Publish TF transform
-    geometry_msgs::msg::TransformStamped odom_tf;
-    odom_tf.header.stamp = current_time;
-    odom_tf.header.frame_id = "odom";
-    odom_tf.child_frame_id = "base_footprint";
-    odom_tf.transform.translation.x = pos_x;
-    odom_tf.transform.translation.y = pos_y;
-    odom_tf.transform.translation.z = 0.0;
-    odom_tf.transform.rotation = odom_msg.pose.pose.orientation;
-    
-    // RCLCPP_INFO(this->get_logger(), "%f %f", pos_x, pos_y);
-    tf_broadcaster->sendTransform(odom_tf);
-  }
-
-  Eigen::VectorXd calculate_motor_speed(float x_, float y_, float w_) {
-    Eigen::Vector3d v(x_, y_, w_);
-    Eigen::VectorXd M = tM*v;
-    return M;
-  }
-
-  void set_motor_speed(Eigen::VectorXd M) {
-    for(int i = 0; i < M.size(); i++) {
-      auto message = std_msgs::msg::Float64MultiArray();
-      message.data = {M(i)};
-      pub_wheels[i]->publish(message);
-    }
-  }
-
-  Eigen::MatrixXd init_transform_matrix(int N, double heading_offset = 0) {
-    Eigen::MatrixXd M = Eigen::MatrixXd::Zero(N, 3);
-    double del_angle = 360 / N;
-    for(int i = 0; i < N; i++){
-      M(i,0) = -sin((del_angle * i + heading_offset) * M_PI / 180)/r;
-      M(i,1) = cos((del_angle * i + heading_offset) * M_PI / 180)/r;
-      M(i,2) = R/r;
-    }
-
-    return M;
-  }
-
-  Eigen::MatrixXd pseudo_inverse(const Eigen::MatrixXd& A, double tolerance = 1e-8) {
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    const auto& singularValues = svd.singularValues();
-    Eigen::MatrixXd S_inv = Eigen::MatrixXd::Zero(svd.matrixV().cols(), svd.matrixU().cols());
-  
-    for (int i = 0; i < singularValues.size(); ++i) {
-      if (singularValues(i) > tolerance) {
-        S_inv(i, i) = 1.0 / singularValues(i);
+    for (size_t i = 0; i < msg->name.size(); ++i) {
+      auto it = joint_index_map_.find(msg->name[i]);
+      if (it != joint_index_map_.end()) {
+        wheel_vel(it->second) = msg->velocity[i];
       }
     }
-  
-    return svd.matrixV() * S_inv * svd.matrixU().transpose();
+
+    rclcpp::Time current_time = this->get_clock()->now();
+    double dt = (current_time - last_time_).seconds();
+    last_time_ = current_time;
+
+    Eigen::Matrix2d rotation;
+    rotation << std::cos(yaw_), -std::sin(yaw_),
+                std::sin(yaw_),  std::cos(yaw_);
+    Eigen::VectorXd dp = rotation * odom_matrix_ * wheel_vel * dt;
+
+    pos_x_ += dp(0);
+    pos_y_ += dp(1);
+
+    if (dt > 0.0) {
+      vel_x_ = dp(0) / dt;
+      vel_y_ = dp(1) / dt;
+    }
+
+    publish_odom(current_time);
+  }
+
+  void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
+  {
+    angular_vel_z_ = msg->angular_velocity.z;
+
+    tf2::Quaternion q(
+      msg->orientation.x,
+      msg->orientation.y,
+      msg->orientation.z,
+      msg->orientation.w);
+
+    double roll, pitch;
+    tf2::Matrix3x3(q).getRPY(roll, pitch, yaw_);
+  }
+
+  void publish_odom(const rclcpp::Time & stamp)
+  {
+    tf2::Quaternion q;
+    q.setRPY(0.0, 0.0, yaw_);
+
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = stamp;
+    odom.header.frame_id = "odom";
+    odom.child_frame_id = "base_footprint";
+    odom.pose.pose.position.x = pos_x_;
+    odom.pose.pose.position.y = pos_y_;
+    odom.pose.pose.position.z = 0.0;
+    odom.pose.pose.orientation.x = q.x();
+    odom.pose.pose.orientation.y = q.y();
+    odom.pose.pose.orientation.z = q.z();
+    odom.pose.pose.orientation.w = q.w();
+    odom.twist.twist.linear.x = vel_x_;
+    odom.twist.twist.linear.y = vel_y_;
+    odom.twist.twist.angular.z = angular_vel_z_;
+
+    odom_pub_->publish(odom);
+
+    geometry_msgs::msg::TransformStamped tf;
+    tf.header.stamp = stamp;
+    tf.header.frame_id = "odom";
+    tf.child_frame_id = "base_footprint";
+    tf.transform.translation.x = pos_x_;
+    tf.transform.translation.y = pos_y_;
+    tf.transform.translation.z = 0.0;
+    tf.transform.rotation = odom.pose.pose.orientation;
+
+    tf_broadcaster_->sendTransform(tf);
+  }
+
+  void publish_wheel_speeds(const Eigen::VectorXd & speeds)
+  {
+    for (int i = 0; i < speeds.size(); ++i) {
+      std_msgs::msg::Float64MultiArray msg;
+      msg.data = {speeds(i)};
+      wheel_pubs_[i]->publish(msg);
+    }
+  }
+
+  Eigen::MatrixXd build_transform_matrix(int n, double offset_deg) const
+  {
+    Eigen::MatrixXd m = Eigen::MatrixXd::Zero(n, 3);
+    double angle_step = 360.0 / n;
+    for (int i = 0; i < n; ++i) {
+      double angle_rad = (angle_step * i + offset_deg) * kPi / 180.0;
+      m(i, 0) = -std::sin(angle_rad) / kWheelRadius;
+      m(i, 1) =  std::cos(angle_rad) / kWheelRadius;
+      m(i, 2) =  kRobotRadius / kWheelRadius;
+    }
+    return m;
+  }
+
+  static Eigen::MatrixXd pseudo_inverse(const Eigen::MatrixXd & a, double tol = 1e-8)
+  {
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(a, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    const auto & sv = svd.singularValues();
+    Eigen::MatrixXd s_inv = Eigen::MatrixXd::Zero(svd.matrixV().cols(), svd.matrixU().cols());
+    for (int i = 0; i < sv.size(); ++i) {
+      if (sv(i) > tol) {
+        s_inv(i, i) = 1.0 / sv(i);
+      }
+    }
+    return svd.matrixV() * s_inv * svd.matrixU().transpose();
   }
 };
 
@@ -260,20 +239,10 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
 
-  const char* env_robot_model = std::getenv("OMNI_ROBOT_MODEL");
-  std::string robot_model = env_robot_model ? env_robot_model : DEFAULT_ROBOT_MODEL;
+  const char * env_model = std::getenv("OMNI_ROBOT_MODEL");
+  std::string robot_model = env_model ? env_model : "3wheel";
 
-  if (robot_wheel_count_list.find(robot_model) == robot_wheel_count_list.end()) {
-    std::string msg = "Unknown robot model: " + robot_model + "\nValid options are:\n";
-    for (const auto& entry : robot_wheel_count_list) {
-      msg += "- " + entry.first + "\n";
-    }
-    throw std::runtime_error(msg);
-  }
-
-  int wheel_count = robot_wheel_count_list[robot_model];
-
-  rclcpp::spin(std::make_shared<OmniKinematics>(wheel_count, ROBOT_RADIUS, WHEEL_RADIUS, robot_offset_heading_list[robot_model]));
+  rclcpp::spin(std::make_shared<OmniKinematics>(robot_model));
   rclcpp::shutdown();
   return 0;
 }

@@ -2,3 +2,9 @@
 build/
 install/
 log/
+
+# Agents
+AGENTS.md
+
+# Templates
+TEMPLATES.md

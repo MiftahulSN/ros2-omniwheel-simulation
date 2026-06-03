@@ -24,6 +24,7 @@ Based on: [YePeOn7/ros2_omni_robot_sim](https://github.com/YePeOn7/ros2_omni_rob
 | ros_gz_sim | `ros-humble-ros-gz-sim` | 0.244.24 |
 | Nav2 | `ros-humble-navigation2` | 1.1.20 |
 | SLAM Toolbox | `ros-humble-slam-toolbox` | 2.6.10 |
+| Joy | `ros-humble-joy` | 3.3.0 |
 
 ### Key Notes on Gazebo Setup
 
@@ -37,11 +38,13 @@ Based on: [YePeOn7/ros2_omni_robot_sim](https://github.com/YePeOn7/ros2_omni_rob
 - Robot spawning: `ros_gz_sim/create`
 - Gazebo launch: `ros_gz_sim/gz_sim.launch.py`
 - Sensor format: SDF-style `<gazebo><sensor>` tags in URDF
+- Gazebo CLI uses `ign` (not `gz`) for service calls in Fortress: `ign service -s /world/<name>/set_pose --reqtype ignition.msgs.Pose ...`
+- SDF world name (inside `<world name="...">`) may differ from filename — parsed at launch time
 
 ### System Quirks
 
 - `gnome-terminal` has snap/libc conflict — do NOT use terminal prefixes in launch files.
-- Teleop uses `curses` (not `termios`/`xterm`), run manually via `ros2 run omni_controller omni_teleop.py`.
+- Teleop has two modes: keyboard (`teleop_keyboard.py`, curses-based) and joystick (`teleop_joy.py`). Auto-detected via `joy_enumerate_devices` in launch files. Override with `teleop:=keyboard` or `teleop:=joy`.
 
 ---
 
@@ -57,31 +60,44 @@ All packages use `omni_` prefix.
 - `package.xml` format 3.
 - Build command: `colcon build` (no symlink-install needed, no generated messages)
 
-### Launch File Patterns
+### Code Style
 
-Two patterns used:
+- Python: OOP-based classes, `snake_case` methods and variables
+- C++: OOP-based classes with `snake_case_` trailing underscore for private members, `kCamelCase` for constants
+- All teleop scripts use `TeleopXxx` class pattern with `run()` / `stop()` lifecycle methods
+- `kinematics.cpp` uses `OmniKinematics` class extending `rclcpp::Node`
 
-1. **Simple pattern** (no runtime argument resolution):
-   ```python
-   def generate_launch_description():
-       return LaunchDescription([
-           DeclareLaunchArgument(...),
-           Node(...),
-       ])
-   ```
+### Launch File Pattern
 
-2. **OpaqueFunction pattern** (when arguments need runtime resolution):
-   ```python
-   def launch_setup(context, *args, **kwargs):
-       arg = context.launch_configurations['arg_name']
-       return [node1, node2]
+All launch files use a **class-based OOP template** with `OpaqueFunction` for runtime argument resolution:
 
-   def generate_launch_description():
-       return LaunchDescription([
-           DeclareLaunchArgument(...),
-           OpaqueFunction(function=launch_setup),
-       ])
-   ```
+```python
+class XxxConfig:
+    def __init__(self):
+        # resolve package share directories
+    def _get_config_paths(self) -> dict:
+        # return dict of config file paths
+
+class XxxNodeFactory:
+    def __init__(self, config: XxxConfig):
+        self.config = config
+    def _load_urdf_content(self, urdf_path: str) -> str:
+        return Command(['xacro ', urdf_path])
+    def create_launch_arguments(self) -> list:
+        return [DeclareLaunchArgument(...), ...]
+    def create_core_nodes(self, context) -> list:
+        # use context.launch_configurations for runtime args
+        return [node1, node2, ...]
+
+def generate_launch_description():
+    config = XxxConfig()
+    factory = XxxNodeFactory(config)
+    launch_entities = list(factory.create_launch_arguments())
+    launch_entities.append(OpaqueFunction(function=factory.create_core_nodes))
+    return LaunchDescription(launch_entities)
+```
+
+Named variants per package: `DescriptionConfig/DescriptionNodeFactory`, `ControllerConfig/ControllerNodeFactory`, `GazeboConfig/GazeboNodeFactory`, `NavSimConfig/NavSimNodeFactory`, `SlamSimConfig/SlamSimNodeFactory`.
 
 ### URDF/Xacro Conventions
 
@@ -127,7 +143,7 @@ src/omni_description/
 │       ├── base_link.urdf.xacro        # 4 wheels + sensors + heading
 │       └── ros2_control.urdf.xacro     # 4 velocity joints
 ├── launch/
-│   └── description.launch.py           # Robot state publisher only
+│   └── description.launch.py           # Class-based: DescriptionConfig + DescriptionNodeFactory
 └── rviz/
     └── description.rviz
 ```
@@ -162,37 +178,35 @@ src/omni_description/
 ```text
 src/omni_controller/
 ├── src/
-│   └── kinematics.cpp              # Omni kinematics + odometry node
+│   └── kinematics.cpp              # OmniKinematics class (OOP-based)
 ├── scripts/
-│   └── omni_teleop.py              # Curses teleop script
+│   ├── teleop_keyboard.py          # TeleopKeyboard class (curses-based)
+│   └── teleop_joy.py               # TeleopJoy class (joystick)
 ├── config/
 │   ├── 3wheel.yaml                 # ros2_control: 3 velocity controllers
-│   └── 4wheel.yaml                 # ros2_control: 4 velocity controllers
+│   ├── 4wheel.yaml                 # ros2_control: 4 velocity controllers
+│   └── joystick.yaml               # Joystick axis/button mapping
 ├── launch/
-│   └── controllers.launch.py       # Controller spawner
+│   └── controllers.launch.py       # Class-based: ControllerConfig + ControllerNodeFactory
 └── CMakeLists.txt
 ```
 
 ### Kinematics Node (`kinematics.cpp`)
 
-The core node that handles forward/inverse kinematics, odometry, and TF broadcasting.
+OOP-based `OmniKinematics` class extending `rclcpp::Node`.
 
 **Algorithm:**
-1. Build transform matrix `tM` (N x 3) mapping `(vx, vy, w)` to N wheel speeds
-2. Compute pseudo-inverse `tMI` (2 x N) for odometry (only first 2 rows for x,y)
-3. `cmd_vel` callback: multiply `tM * [vx, vy, w]` → wheel speeds → publish to each `wheelN_controller/commands`
-4. `joint_states` callback: compute odometry via `rM * tMI * wheel_velocities * dt`
-5. `imu` callback: extract yaw from IMU quaternion for rotation compensation
+1. Build transform matrix (N x 3) mapping `(vx, vy, w)` to N wheel speeds
+2. Compute SVD pseudo-inverse, extract first 2 rows for odometry
+3. `cmd_vel` callback: `transform_matrix * [vx, vy, w]` → wheel speeds → publish
+4. `joint_state` callback: `rotation * odom_matrix * wheel_vel * dt` → accumulate position
+5. `imu` callback: extract yaw from quaternion for rotation compensation
 
-**Odometry:**
-- Position: accumulated from wheel velocities with IMU-based rotation compensation
-- Velocity: computed as `dp/dt` from wheel odometry
-- Orientation: from IMU quaternion (yaw only)
-- Publishes: `/odom` (nav_msgs/Odometry) + TF `odom → base_footprint`
-
-**Key constants:**
-- `WHEEL_RADIUS = 0.03`, `ROBOT_RADIUS = 0.088`
+**Key design:**
+- Robot config stored in `kRobotModels` struct map (not global variables)
+- Constants as `static constexpr` class members: `kWheelRadius = 0.03`, `kRobotRadius = 0.088`
 - Configured via `OMNI_ROBOT_MODEL` env var (set by launch file)
+- Publishes: `/odom` (nav_msgs/Odometry) + TF `odom → base_footprint`
 
 ### Controller Config
 
@@ -201,11 +215,37 @@ Each wheel has its own `JointGroupVelocityController`:
 - Topic: `wheelN_controller/commands` (Float64MultiArray)
 - Update rate: 50Hz
 
-### Teleop Script
+### Teleop Scripts
 
-- Run: `ros2 run omni_controller omni_teleop.py`
-- Uses `curses` for key input
-- Publishes `Twist` to `cmd_vel`
+Both are OOP-based classes with velocity ramping.
+
+**TeleopKeyboard:**
+- `TeleopKeyboard(node)` class with `_loop()`, `_update_velocity()`, `_handle_key()`, `_draw_speed()` methods
+- Uses `curses` for terminal rendering
+- WASD + QE layout, speed adjustable with C/Z/V/X keys
+
+**TeleopJoy:**
+- `TeleopJoy(node)` class with `_joy_callback()`, `_handle_buttons()`, `_update_velocity()`, `_respawn()`, `_compute_dt()` methods
+- Subscribes to `joy` topic, publishes `cmd_vel`
+- Auto-detects joystick via `joy_enumerate_devices` in launch files
+- Override with `teleop:=keyboard` or `teleop:=joy` launch argument
+- Parameters: `world` (for respawn), `spawn_z` (default 0.1)
+
+**Joystick mapping** (DragonRise Inc. Generic USB Joystick):
+
+| Input | Index | Action |
+|---|---|---|
+| Left stick roll | axis 0 | Rotate left / right |
+| Right stick pitch | axis 3 | Forward / backward |
+| Right stick roll | axis 2 | Strafe left / right |
+| R1 | btn 5 | Increase linear speed |
+| L1 | btn 4 | Decrease linear speed |
+| R2 | btn 7 | Increase angular speed |
+| L2 | btn 6 | Decrease angular speed |
+| Start | btn 9 | Toggle enable (starts enabled) |
+| Select | btn 8 | Respawn at origin via `ign service` |
+
+**Config:** `config/joystick.yaml`
 
 ---
 
@@ -216,24 +256,28 @@ Each wheel has its own `JointGroupVelocityController`:
 ```text
 src/omni_gazebo/
 ├── launch/
-│   └── gazebo.launch.py            # Full sim pipeline (OpaqueFunction)
+│   └── gazebo.launch.py            # Class-based: GazeboConfig + GazeboNodeFactory
 ├── config/
 │   └── bridge.yaml                 # 7 GZ-to-ROS2 topic bridges
 ├── worlds/
-│   ├── maze1.sdf
-│   └── maze2.sdf
+│   ├── maze1.sdf                   # World name: "default"
+│   └── maze2.sdf                   # World name: "simple_world"
 └── CMakeLists.txt
 ```
 
 ### Launch Pipeline (gazebo.launch.py)
 
-1. Set `IGN_GAZEBO_RESOURCE_PATH` for mesh loading
-2. `robot_state_publisher` with `use_sim_time: True`
-3. `ros_gz_sim/gz_sim.launch.py` with world file (default: maze2)
-4. `ros_gz_sim/create` to spawn robot at z=0.1m
-5. `ros_gz_bridge` with bridge.yaml
-6. `controller_manager/spawner` for `joint_state_broadcaster` + `wheelN_controller`s
-7. `omni_controller/kinematics` node with `OMNI_ROBOT_MODEL` env var
+`GazeboConfig` resolves package paths, parses SDF world name, provides xacro/bridge paths.
+`GazeboNodeFactory` creates nodes via private `_create_*` methods:
+
+1. `_create_env_setup()` — set `IGN_GAZEBO_RESOURCE_PATH`
+2. `_create_robot_state_publisher()` — URDF from xacro
+3. `_create_gazebo()` — `ros_gz_sim/gz_sim.launch.py`
+4. `_create_spawn_robot()` — `ros_gz_sim/create` at z=0.1m
+5. `_create_bridge()` — `ros_gz_bridge` with bridge.yaml
+6. `_create_controller_spawner()` — joint_state_broadcaster + wheel controllers
+7. `_create_kinematics()` — omni kinematics node
+8. `_create_teleop_nodes()` — auto-detect or override joystick/keyboard
 
 ### Launch Arguments
 
@@ -241,6 +285,7 @@ src/omni_gazebo/
 |---|---|---|---|
 | `wheel_config` | `3wheel` | `3wheel`, `4wheel` | Wheel configuration |
 | `world` | `maze2` | any | Gazebo world name (without .sdf) |
+| `teleop` | `auto` | `auto`, `joy`, `keyboard` | Teleop mode |
 
 ### Sensor Bridge Topics
 
@@ -291,7 +336,6 @@ Data-only package (no launch files, no compiled targets). Config and maps are co
 
 - Uses SLAM Toolbox online async mode with `slam_params.yaml`
 - Config: Ceres solver, 0.05m resolution, loop closing enabled
-- Launch: `omni_bringup/slam_sim.launch.py`
 
 ---
 
@@ -302,12 +346,12 @@ Data-only package (no launch files, no compiled targets). Config and maps are co
 ```text
 src/omni_bringup/
 ├── launch/
-│   ├── nav_sim.launch.py           # Gazebo + Nav2 bringup (AMCL + planning)
-│   └── slam_sim.launch.py          # Gazebo + SLAM Toolbox
+│   ├── nav_sim.launch.py           # Class-based: NavSimConfig + NavSimNodeFactory
+│   └── slam_sim.launch.py          # Class-based: SlamSimConfig + SlamSimNodeFactory
 └── CMakeLists.txt
 ```
 
-Both launch files accept `wheel_config` and `world` arguments.
+Both launch files accept `wheel_config`, `world`, and `teleop` arguments. They include `omni_gazebo` and add Nav2 or SLAM respectively.
 
 ---
 
@@ -329,7 +373,8 @@ ros2_ws/
 omni_bringup
   ├── omni_gazebo
   │     ├── omni_description (URDF)
-  │     └── omni_controller (config + kinematics node)
+  │     ├── omni_controller (config + kinematics node)
+  │     └── joy (joystick driver)
   ├── omni_navigation (config + maps + rviz)
   ├── nav2_bringup
   └── slam_toolbox
@@ -345,7 +390,7 @@ omni_controller
 ```text
 cmd_vel (Twist)
   → omni_kinematics node
-    → tM * [vx, vy, wz] → wheel speeds
+    → transform_matrix * [vx, vy, wz] → wheel speeds
       → wheelN_controller/commands (Float64MultiArray)
         → velocity_controllers/JointGroupVelocityController
           → gz_ros2_control/GazeboSimSystem
@@ -353,7 +398,7 @@ cmd_vel (Twist)
 
 joint_states + imu
   → omni_kinematics node
-    → rM * tMI * wheel_vel * dt → position delta
+    → rotation * odom_matrix * wheel_vel * dt → position delta
       → accumulate pos_x, pos_y
       → publish /odom + TF (odom → base_footprint)
 ```
@@ -363,23 +408,28 @@ joint_states + imu
 ## How to Run the Full Simulation
 
 ```bash
-# Terminal 1: Build and launch simulation
+# Build and launch simulation (teleop auto-detected)
 source /opt/ros/humble/setup.bash
 cd /home/mift/Projects/Simulation/Omni-Wheel/ros2_ws
 colcon build
 source install/setup.bash
 ros2 launch omni_gazebo gazebo.launch.py
 
-# Terminal 2: Teleop (wait for simulation to load)
-source /opt/ros/humble/setup.bash
-source /home/mift/Projects/Simulation/Omni-Wheel/ros2_ws/install/setup.bash
-ros2 run omni_controller omni_teleop.py
+# Force keyboard teleop:
+ros2 launch omni_gazebo gazebo.launch.py teleop:=keyboard
+
+# Force joystick teleop:
+ros2 launch omni_gazebo gazebo.launch.py teleop:=joy
+
+# 4-wheel configuration:
+ros2 launch omni_gazebo gazebo.launch.py wheel_config:=4wheel
 ```
 
-### With 4-wheel configuration
+### Manual teleop (without simulation launch)
 
 ```bash
-ros2 launch omni_gazebo gazebo.launch.py wheel_config:=4wheel
+ros2 run omni_controller teleop_keyboard.py
+ros2 run omni_controller teleop_joy.py
 ```
 
 ### SLAM mapping
@@ -401,6 +451,7 @@ ros2 control list_controllers
 ros2 topic echo /joint_states
 ros2 topic echo /odom
 ros2 topic echo /scan
+ros2 topic echo /joy
 ros2 run tf2_tools view_frames
 ```
 
@@ -448,3 +499,7 @@ ros2 run tf2_tools view_frames
 | Nav2 motion model | OmniMotionModel | Omnidirectional robot can strafe |
 | Nav2 controller | DWB with Y-axis enabled | Allows lateral movement in path planning |
 | Bridge msg format | `gz.msgs.*` (not `ignition.msgs.*`) | Fortress supports both; `gz` is the current standard |
+| Gazebo CLI | `ign` for service calls | Fortress `gz` CLI returns "Invalid arguments" for service calls |
+| Teleop integration | Auto-detect via `joy_enumerate_devices` | Seamless UX: plug in joystick and it works |
+| Launch file pattern | Class-based OOP with Config + NodeFactory | Separation of config resolution from node creation |
+| Code style | OOP-based classes throughout | Consistent pattern across Python scripts, C++ node, and launch files |

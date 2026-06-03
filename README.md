@@ -1,14 +1,14 @@
-# ROS2 Omni-Wheel Robot Simulation
+# OMNI-WHEEL ROBOT SIMULATION
 
-A ROS2 Humble simulation of an omnidirectional mobile robot.
+Omnidirectional mobile robot simulation on **ROS2 Humble + Gazebo Fortress**.
 
-Supports **3-wheel** (120-degree) and **4-wheel** (X-configuration) omni-wheel variants.
+Supports **3-wheel** (120° spacing) and **4-wheel** (X-configuration, 90° spacing) variants with teleop, SLAM mapping, and autonomous navigation.
 
-> **Note**: This project is a personal learning and educational exercise. It was built from scratch to understand the full ROS2 simulation stack (URDF, Gazebo, ros2_control, SLAM, Nav2) by studying and re-implementing concepts from the reference listed below. It is not intended for production use.
+> personal learning projects.
 
 ---
 
-## Prerequisites
+## 📋 Prerequisites
 
 | Component | Version |
 |---|---|
@@ -16,150 +16,202 @@ Supports **3-wheel** (120-degree) and **4-wheel** (X-configuration) omni-wheel v
 | Gazebo | Ignition Fortress 6 |
 | ros2_control | 2.54+ |
 | gz_ros2_control | 0.7+ |
-| SLAM Toolbox | 2.6+ |
 | Nav2 | 1.1+ |
+| SLAM Toolbox | 2.6+ |
+| joy (optional) | 3.3+ |
 
 ---
 
-## Architecture
+## 🚀 Quick Start
 
-```text
-ros2_ws/
-└── src/
-    ├── omni_description/     # Robot model (URDF/Xacro, meshes, RViz)
-    ├── omni_controller/      # Controller configs & omni kinematics node
-    ├── omni_gazebo/          # Gazebo worlds, spawn, sensor bridges
-    ├── omni_navigation/      # SLAM Toolbox & Nav2 configs
-    └── omni_bringup/         # Top-level launch orchestration
-```
+```bash
+source /opt/ros/humble/setup.bash
+cd ros2_ws
+colcon build
+source install/setup.bash
 
-### Package Responsibilities
-
-| Package | Role |
-|---|---|
-| `omni_description` | URDF/Xacro robot model, meshes, shared sensor macros |
-| `omni_controller` | ros2_control configs, omni-directional kinematics node |
-| `omni_gazebo` | Gazebo world files, robot spawning, sensor topic bridges |
-| `omni_navigation` | SLAM Toolbox mapping, Nav2 autonomous navigation |
-| `omni_bringup` | Top-level launch files composing the full stack |
-
-### Dependency Graph
-
-```text
-                        omni_bringup
-        |                   |                   |
-        v                   v                   v
-    omni_gazebo         omni_controller     omni_navigation
-        |                   |                   |
-        v                   v                   v
-    omni_description    omni_description    omni_description
-```
-
-### URDF Structure (DRY Design)
-
-Shared xacro macros live in `urdf/common/` and are parameterized so both wheel variants reuse the same sensor, roller, and wheel definitions:
-
-```text
-omni_description/urdf/
-├── common/                 # Shared macros (lidar, camera, imu, roller, wheel)
-│   └── sensors/
-├── 3wheel/                 # 3-wheel variant (base_link positions, 3-joint ros2_control)
-└── 4wheel/                 # 4-wheel variant (base_link positions, 4-joint ros2_control)
+# Launch simulation (teleop auto-detects joystick)
+ros2 launch omni_gazebo gazebo.launch.py
 ```
 
 ---
 
-## Build
+## 🔨 Build
 
 ```bash
 cd ros2_ws
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
+colcon build
 source install/setup.bash
 ```
 
 ---
 
-## Usage
+## 🎮 Usage
+
+### Robot Model Visualization
 
 ```bash
-# Visualize robot model in RViz
-ros2 launch omni_description description.launch.py wheel_config:=3wheel
-
-# Launch Gazebo simulation
-ros2 launch omni_bringup sim.launch.py wheel_config:=3wheel
-
-# SLAM mapping
-ros2 launch omni_bringup slam.launch.py wheel_config:=3wheel
-
-# Autonomous navigation
-ros2 launch omni_bringup navigation.launch.py wheel_config:=3wheel
+ros2 launch omni_description description.launch.py
 ```
 
-Replace `3wheel` with `4wheel` for the 4-wheel variant.
+| Argument | Default | Description |
+|---|---|---|
+| `wheel_config` | `3wheel` | `3wheel` or `4wheel` |
+| `rviz` | `true` | Launch RViz2 |
 
-### Teleop (run in a separate terminal)
+### Simulation + Teleop
 
 ```bash
-ros2 run omni_controller omni_teleop.py
-
-# Or via launch
-ros2 launch omni_bringup teleop.launch.py
+ros2 launch omni_gazebo gazebo.launch.py
 ```
+
+| Argument | Default | Choices | Description |
+|---|---|---|---|
+| `wheel_config` | `3wheel` | `3wheel`, `4wheel` | Wheel configuration |
+| `world` | `maze2` | any | Gazebo world name (without `.sdf`) |
+| `teleop` | `auto` | `auto`, `joy`, `keyboard` | Teleop mode |
+
+### SLAM Mapping
+
+```bash
+ros2 launch omni_bringup slam_sim.launch.py
+```
+
+Accepts `wheel_config`, `world`, and `teleop` arguments.
+
+### Autonomous Navigation
+
+```bash
+ros2 launch omni_bringup nav_sim.launch.py
+```
+
+Accepts `wheel_config`, `world`, and `teleop` arguments.
+
+### Manual Teleop (without simulation)
+
+```bash
+ros2 run omni_controller teleop_keyboard.py
+ros2 run omni_controller teleop_joy.py        # requires joy_node
+```
+
+---
+
+## 🕹️ Teleop Controls
+
+### Keyboard
 
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
 | `W` / `S` | Forward / Backward | | `Q` / `E` | Rotate left / right |
 | `A` / `D` | Strafe left / right | | `Space` | Stop all |
 | `C` / `Z` | Linear speed +/- | | `V` / `X` | Angular speed +/- |
+| `Ctrl+C` | Quit | | | |
+
+### Joystick
+
+| Input | Action |
+|---|---|
+| Right stick pitch | Forward / backward |
+| Right stick roll | Strafe left / right |
+| Left stick roll | Rotate left / right |
+| R1 | Increase linear speed |
+| L1 | Decrease linear speed |
+| R2 | Increase angular speed |
+| L2 | Decrease angular speed |
+| Start | Toggle enable (starts enabled) |
+| Select | Respawn robot at origin |
 
 ---
 
-## Pipeline
+## 🏗️ Architecture
 
 ```text
-Robot Description →  RViz Visualization  →  Gazebo Simulation
-      ↓                                       ↓
-    URDF/Xacro                              Sensor Integration
-                                              ↓
-                                            Robot Control (omni kinematics)
-                                              ↓
-                                            SLAM Mapping (SLAM Toolbox)
-                                              ↓
-                                            Nav2 Navigation (MPPI Omni)
-                                              ↓
-                                            Autonomous Omnidirectional Robot
+ros2_ws/
+└── src/
+    ├── omni_description/     # URDF/Xacro robot model, meshes, sensors
+    ├── omni_controller/      # Kinematics node, teleop, ros2_control configs
+    ├── omni_gazebo/          # Gazebo worlds, spawn, sensor bridges
+    ├── omni_navigation/      # Nav2 + SLAM configs, maps, RViz
+    └── omni_bringup/         # Top-level launch files
+```
+
+### Dependency Graph
+
+```text
+omni_bringup
+  ├── omni_gazebo
+  │     ├── omni_description
+  │     └── omni_controller
+  ├── omni_navigation
+  ├── nav2_bringup
+  └── slam_toolbox
+```
+
+### Control Pipeline
+
+```text
+cmd_vel → omni_kinematics → tM * [vx, vy, wz] → wheel speeds → gz_ros2_control → Gazebo
+
+joint_states + imu → omni_kinematics → wheel odometry → /odom + TF (odom → base_footprint)
 ```
 
 ---
 
-## Outcome
+## 📦 Package Details
 
-A fully functional ROS2 simulation stack where an omnidirectional robot can:
+### omni_description
 
-- Move in any direction (strafe, rotate, diagonal)
-- Simulate realistic physics in Gazebo Fortress
-- Sense the environment (LiDAR, IMU, RGB-D camera)
-- Build occupancy grid maps using SLAM Toolbox
-- Navigate autonomously using Nav2 with holonomic planning
+URDF/Xacro robot model with DRY design — shared macros in `urdf/common/` parameterized for both wheel variants.
+
+**Sensors:**
+
+| Sensor | Type | Rate | Details |
+|---|---|---|---|
+| IMU | Gazebo IMU | 100 Hz | Orientation + angular velocity |
+| Camera | RGB | 30 Hz | 640×480 |
+| Depth | Depth | 10 Hz | 320×240 |
+| LiDAR | GPU LiDAR | 5 Hz | 360 samples, 10 m range |
+
+**Physical constants:** wheel radius 0.03 m, robot radius 0.088 m, base mass 3.0 kg.
+
+### omni_controller
+
+**Kinematics node** (`kinematics.cpp`): OOP-based `OmniKinematics` class. Computes inverse kinematics via SVD pseudo-inverse of the wheel transform matrix. Fuses wheel odometry with IMU yaw for pose estimation.
+
+**Teleop scripts:** OOP-based `TeleopKeyboard` and `TeleopJoy` classes with velocity ramping and configurable speed limits. Joystick teleop supports respawn via Gazebo's `set_pose` service.
+
+**Controllers:** Per-wheel `JointGroupVelocityController` at 50 Hz.
+
+### omni_gazebo
+
+Spawns the full simulation pipeline: Gazebo Fortress + robot state publisher + sensor bridges + controller spawner + kinematics + teleop. Teleop auto-detects joystick via `joy_enumerate_devices`.
+
+### omni_navigation
+
+Data-only package with Nav2 and SLAM Toolbox configs. Nav2 uses DWB controller with omnidirectional movement enabled (`max_vel_y: 1.5`). SLAM Toolbox in online async mode with Ceres solver.
+
+### omni_bringup
+
+Top-level launch files composing Gazebo + Nav2 or Gazebo + SLAM. Passes all arguments through to `omni_gazebo`.
 
 ---
 
-## Acknowledgements
+## 🔍 Debugging
 
-This project would not have been possible without the following reference:
-
-### [YePeOn7/ros2_omni_robot_sim](https://github.com/YePeOn7/ros2_omni_robot_sim)
-
-A huge thank you to **[YePeOn7](https://github.com/YePeOn7)** for creating an excellent omnidirectional robot Gazebo simulation with ROS2. Their project was the primary reference and inspiration for this entire learning exercise. Specifically, the following concepts and techniques were learned and adapted from their work:
-
-- Omnidirectional kinematics (forward/inverse via matrix transform + SVD pseudo-inverse)
-- URDF/Xacro robot modeling with shared sensor macros
-- Gazebo Ignition simulation integration (`gz_ros2_control`, sensor bridges)
-- ros2_control hardware interface setup (velocity controllers)
-- SLAM Toolbox mapping pipeline
-- Nav2 autonomous navigation configuration
-
-Their original repo supports 3 to 6 wheel variants on **ROS2 Jazzy + Gazebo Harmonic**, while this project was rewritten from the ground up for **ROS2 Humble + Gazebo Fortress** with a different multi-package architecture and some modifications along the way.
+```bash
+ros2 control list_controllers
+ros2 topic echo /cmd_vel
+ros2 topic echo /odom
+ros2 topic echo /scan
+ros2 topic echo /joy
+ros2 run tf2_tools view_frames
+```
 
 ---
+
+## 🙏 Acknowledgements
+
+Big thanks to [YePeOn7/ros2_omni_robot_sim](https://github.com/YePeOn7/ros2_omni_robot_sim) 
+
+Rewritten from scratch for ROS2 Humble + Gazebo Fortress with a different multi-package architecture.

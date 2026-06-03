@@ -1,0 +1,17 @@
+teleop_joy:
+  ros__parameters:
+    linear_speed: 0.5
+    angular_speed: 1.0
+    linear_max: 2.0
+    angular_max: 4.0
+    deadzone: 0.15
+    ramp_rate: 8.0
+    axis_lin_x: 3
+    axis_lin_y: 2
+    axis_ang_z: 0
+    btn_lin_speed_up: 5
+    btn_lin_speed_down: 4
+    btn_ang_speed_up: 7
+    btn_ang_speed_down: 6
+    btn_enable: 9
+    btn_respawn: 8

@@ -32,7 +32,8 @@ install(TARGETS kinematics
 )
 
 install(PROGRAMS
-  scripts/omni_teleop.py
+  scripts/teleop_keyboard.py
+  scripts/teleop_joy.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
